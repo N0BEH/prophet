@@ -83,7 +83,7 @@ def loadRedisData():
 
     return results
 
-def predict_candidates(data, number_of_cicles, freq):
+def predict_candidates(data, number_of_cicles, freq, event):
     forecasts = []
 
     for candidate in ['candidate_1', 'candidate_2', 'candidate_3']:
@@ -91,7 +91,7 @@ def predict_candidates(data, number_of_cicles, freq):
         df = df.rename(columns={candidate: 'y'})
         df['ds'] = pd.to_datetime(df['ds'])
 
-        model_candidates = Prophet()
+        model_candidates = Prophet(holidays=event)
         model_candidates.fit(df)
 
         future_dates = model_candidates.make_future_dataframe(periods=int(number_of_cicles), freq=str(freq))
@@ -100,13 +100,13 @@ def predict_candidates(data, number_of_cicles, freq):
 
     return forecasts  # A list of three forecasts
 
-def predict_servers(data, number_of_cicles, forecast_candidates, freq):
+def predict_servers(data, number_of_cicles, forecast_candidates, freq, event):
     df = pd.DataFrame(data)
     df = df.rename(columns={'servers': 'y', 'candidate_1': 'candidate_1', 'candidate_2': 'candidate_2',
                             'candidate_3': 'candidate_3'})
     df['ds'] = pd.to_datetime(df['ds'])
 
-    model_servers = Prophet()
+    model_servers = Prophet(holidays=event)
     model_servers.add_regressor('candidate_1')
     model_servers.add_regressor('candidate_2')
     model_servers.add_regressor('candidate_3')
@@ -147,9 +147,16 @@ def predict_servers(data, number_of_cicles, forecast_candidates, freq):
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     frequence = '10min'  # minutes
-    number_of_cicles = 2
+    number_of_cicles = 1
 
     fromRedis = True  # Set this to False if you want to load data from CSV
+
+    evenement_ouverture = pd.DataFrame({
+        'holiday': 'event',
+        'ds': pd.to_datetime(['2023-07-12', '2023-06-16']),
+        'lower_window': 0,
+        'upper_window': 1,
+    })
 
     if fromRedis:
         data = loadRedisData()
@@ -157,5 +164,5 @@ if __name__ == '__main__':
     else:
         data = loadDataFromCSV()
 
-    forecast_candidates = predict_candidates(data, number_of_cicles, frequence)
-    predict_servers(data, number_of_cicles, forecast_candidates, frequence)
+    forecast_candidates = predict_candidates(data, number_of_cicles, frequence, evenement_ouverture)
+    predict_servers(data, number_of_cicles, forecast_candidates, frequence, evenement_ouverture)
