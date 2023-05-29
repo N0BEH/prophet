@@ -120,10 +120,10 @@ def predict_servers(number_of_cicles, forecast_candidates):
     forecast_future = forecast_servers[forecast_servers['ds'] > max(df['ds'])]
     print(forecast_future[['ds', 'yhat', 'yhat_lower', 'yhat_upper']])
 
-    # fig1 = model_servers.plot(forecast_servers)
-    # fig2 = model_servers.plot_components(forecast_servers)
-    # plot_plotly(model_servers, forecast_servers)
-    # plot_components_plotly(model_servers, forecast_servers)
+    #fig1 = model_servers.plot(forecast_servers)
+    #fig2 = model_servers.plot_components(forecast_servers)
+    #plot_plotly(model_servers, forecast_servers)
+    #plot_components_plotly(model_servers, forecast_servers)
 
 
 # Press the green button in the gutter to run the script.
