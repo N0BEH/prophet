@@ -6,42 +6,7 @@ import pandas as pd
 from prophet import Prophet
 import redis
 from datetime import datetime, timedelta
-from prophet.plot import plot_plotly, plot_components_plotly
-
 from PointInTime import PointInTime
-
-
-def destroyAllRedisData():
-    r = redis.Redis(host='localhost', port=6379, db=0)
-    r.flushall()
-
-    r2 = redis.Redis(host='localhost', port=6379, db=1)
-    r2.flushall()
-
-
-def generateRandomData():
-    r = redis.Redis(host='localhost', port=6379, db=0)
-
-    now = datetime.now()
-
-    start_time = now
-
-    total_periods = int(1 * 24 * 60 / 5)
-
-    for i in range(0, total_periods):
-        key = start_time.strftime("%Y-%m-%d/%H-%M-%S")
-
-        seconds_since_midnight = (
-                    start_time - start_time.replace(hour=0, minute=0, second=0, microsecond=0)).total_seconds()
-        radians = math.pi * seconds_since_midnight / (12 * 60 * 60)
-
-        value = math.ceil((math.sin(radians) + 1) / 2 * 4)
-        value2 = math.ceil((math.sin(radians) + 1) / 2 * 12)
-
-        r.set("Elypool:PointInTime:" + key + ":servers", value)
-        r.set("Elypool:PointInTime:" + key + ":candidates", value2)
-
-        start_time = start_time - timedelta(minutes=5)
 
 def loadDataFromCSV():
     df = pd.read_csv('output.csv')
@@ -56,7 +21,7 @@ def loadRedisDataToCSV():
 
     prefix = 'Elypool:PointInTime:'
 
-    one_day_ago = datetime.now() - timedelta(days=1)
+    one_day_ago = datetime.now() - timedelta(days=10)
 
     data_points = {}
 
@@ -162,11 +127,9 @@ if __name__ == '__main__':
 
     fromRedis = True
 
-    if not fromRedis:
-        loadRedisDataToCSV()
-
     if fromRedis:
         data = loadRedisData()
+        loadRedisDataToCSV()
     else:
         data = loadDataFromCSV()
 
