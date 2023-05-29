@@ -16,7 +16,7 @@ def loadDataFromCSV():
     data = df.to_dict('records')
     return data
 
-def loadRedisDataToCSV():
+def loadRedisDataToCSV(filterType, nCandidates):
     r = redis.Redis(host='localhost', port=6379)
 
     prefix = 'Elypool:PointInTime:'
@@ -33,7 +33,7 @@ def loadRedisDataToCSV():
         if key_datetime > ten_days_ago:
             data = r.get(key).decode()
 
-            data_points[key_datetime.strftime('%Y-%m-%d %H:%M:%S')] = PointInTime.from_json(data)
+            data_points[key_datetime.strftime('%Y-%m-%d %H:%M:%S')] = PointInTime.from_json(data,filterType)
 
     sorted_keys = sorted(data_points.keys())
 
@@ -44,17 +44,17 @@ def loadRedisDataToCSV():
 
     with open('output.csv', 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['ds', 'servers', 'candidate_1', 'candidate_2', 'candidate_3'])
+        writer.writerow(['ds', 'servers'] + [f'candidate_{i + 1}' for i in range(nCandidates)])
 
         for key in sorted_keys:
-            print(key)
             servers = data_points[key].get_total_servers() if key in data_points else ''
-            candidates = [stat.get_total_candidates() for stat in data_points[key].stats] if key in data_points else ['','','']
+            candidates = [stat.get_total_candidates() for stat in data_points[key].stats] if key in data_points else ['' for _ in range(nCandidates)]
             writer.writerow([key, servers, *candidates])
 
     print('Les données ont été écrites dans output.csv')
 
-def loadRedisData():
+
+def loadRedisData(filterType, nCandidates):
     r = redis.Redis(host='localhost', port=6379)
 
     prefix = 'Elypool:PointInTime:'
@@ -71,15 +71,22 @@ def loadRedisData():
         if key_datetime > one_day_ago:
             data = r.get(key).decode()
 
-            data_points[key_datetime.strftime('%Y-%m-%d %H:%M:%S')] = PointInTime.from_json(data)
+            data_points[key_datetime.strftime('%Y-%m-%d %H:%M:%S')] = PointInTime.from_json(data, filterType)
 
     sorted_keys = sorted(data_points.keys())
 
     results = []
     for key in sorted_keys:
         servers = data_points[key].get_total_servers() if key in data_points else ''
-        candidates = [stat.get_total_candidates() for stat in data_points[key].stats] if key in data_points else ['','','']
-        results.append({'ds': key, 'servers': servers, 'candidate_1': candidates[0], 'candidate_2': candidates[1], 'candidate_3': candidates[2]})
+        candidates = [stat.get_total_candidates() for stat in data_points[key].stats] if key in data_points else ['' for
+                                                                                                                  _ in
+                                                                                                                  range(
+                                                                                                                      nCandidates)]
+
+        result_dict = {'ds': key, 'servers': servers}
+        for i in range(nCandidates):
+            result_dict[f'candidate_{i + 1}'] = candidates[i]
+        results.append(result_dict)
 
     return results
 
@@ -102,23 +109,19 @@ def predict_candidates(data, number_of_cicles, freq, event):
 
 def predict_servers(data, number_of_cicles, forecast_candidates, freq, event):
     df = pd.DataFrame(data)
-    df = df.rename(columns={'servers': 'y', 'candidate_1': 'candidate_1', 'candidate_2': 'candidate_2',
-                            'candidate_3': 'candidate_3'})
+    df = df.rename(columns={'servers': 'y'})
     df['ds'] = pd.to_datetime(df['ds'])
 
     model_servers = Prophet(holidays=event)
-    model_servers.add_regressor('candidate_1')
-    model_servers.add_regressor('candidate_2')
-    model_servers.add_regressor('candidate_3')
-
-    for i, forecast in enumerate(forecast_candidates):
-        df['candidate_{}'.format(i + 1)] = forecast['yhat']
+    for i in range(len(forecast_candidates)):
+        df[f'candidate_{i + 1}'] = forecast_candidates[i]['yhat']
+        model_servers.add_regressor(f'candidate_{i + 1}')
 
     model_servers.fit(df)
 
     future = df.copy()
-    for i, forecast in enumerate(forecast_candidates):
-        future['candidate_{}'.format(i + 1)] = forecast['yhat']
+    for i in range(len(forecast_candidates)):
+        future[f'candidate_{i + 1}'] = forecast_candidates[i]['yhat']
 
     # Add future periods
     last_date = future['ds'].max()
@@ -127,16 +130,15 @@ def predict_servers(data, number_of_cicles, forecast_candidates, freq, event):
     future_periods_df = pd.DataFrame(index=future_periods)
     future_periods_df.reset_index(inplace=True)
     future_periods_df.columns = ['ds']
-    for i in range(3):
-        future_periods_df['candidate_{}'.format(i + 1)] = forecast_candidates[i]['yhat'].tail(
-            number_of_cicles).values
+    for i in range(len(forecast_candidates)):
+        future_periods_df[f'candidate_{i + 1}'] = forecast_candidates[i]['yhat'].tail(number_of_cicles).values
 
     future = pd.concat([future, future_periods_df])
 
     forecast_servers = model_servers.predict(future)
 
     forecast_future = forecast_servers[forecast_servers['ds'] > max(df['ds'])]
-    print(forecast_future[['ds', 'yhat', 'yhat_lower', 'yhat_upper']])
+    return (forecast_future[['ds', 'yhat', 'yhat_lower', 'yhat_upper']])
 
     #fig1 = model_servers.plot(forecast_servers)
     #fig2 = model_servers.plot_components(forecast_servers)
@@ -149,8 +151,6 @@ if __name__ == '__main__':
     frequence = '10min'  # minutes
     number_of_cicles = 1
 
-    fromRedis = True  # Set this to False if you want to load data from CSV
-
     evenement_ouverture = pd.DataFrame({
         'holiday': 'event',
         'ds': pd.to_datetime(['2023-07-12', '2023-06-16']),
@@ -158,11 +158,27 @@ if __name__ == '__main__':
         'upper_window': 1,
     })
 
-    if fromRedis:
-        data = loadRedisData()
-        loadRedisDataToCSV()
-    else:
-        data = loadDataFromCSV()
+    fromRedis = True  # Set this to False if you want to load data from CSV
 
-    forecast_candidates = predict_candidates(data, number_of_cicles, frequence, evenement_ouverture)
-    predict_servers(data, number_of_cicles, forecast_candidates, frequence, evenement_ouverture)
+    filters = {
+        'kolizeum' : 3,
+    }
+
+    for key, value in filters.items():
+        print(key, value)
+
+        if fromRedis:
+            data = loadRedisData(key, value)
+            loadRedisDataToCSV(key, value)
+        else:
+            data = loadDataFromCSV()
+
+        forecast_candidates = predict_candidates(data, number_of_cicles, frequence, evenement_ouverture)
+        res = predict_servers(data, number_of_cicles, forecast_candidates, frequence, evenement_ouverture)
+
+        if fromRedis:
+            r = redis.Redis(host='localhost', port=6379)
+            r.set(f'Elypool:Forecast:{key}', res.to_json(orient='records'))
+
+
+

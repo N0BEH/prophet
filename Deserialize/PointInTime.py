@@ -32,8 +32,17 @@ class PointInTime:
         return self.total_servers
 
     @classmethod
-    def from_json(cls, data):
+    def from_json(cls, data, filterType):
         data_dict = json.loads(data)
         stats = [MatchmakingStats.from_json(json.dumps(stat)) for stat in data_dict.get('stats', [])]
-        return cls(data_dict.get('totalCandidates', 0), data_dict.get('totalServers', 0), stats, data_dict.get('time'))
+
+        final_stats = []
+
+        for(stat) in stats:
+            if stat.get_queue_type()['serverName'] == filterType:
+                final_stats.append(stat)
+
+
+
+        return cls(data_dict.get('totalCandidates', 0), data_dict.get('totalServers', 0), final_stats, data_dict.get('time'))
 

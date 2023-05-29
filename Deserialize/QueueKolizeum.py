@@ -1,5 +1,5 @@
 from QueueType import QueueType
-
+import json
 
 class QueueKolizeum(QueueType):
     def __init__(self, per_player_team=0, max_teams=0, priority=0, server_name=None, action=False):
@@ -31,3 +31,9 @@ class QueueKolizeum(QueueType):
 
     def is_type_of(self, other):
         return isinstance(other, QueueKolizeum)
+
+    @classmethod
+    def from_json(cls, data):
+        data_dict = json.loads(data)
+        return cls(data_dict.get('perPlayerTeam', 0), data_dict.get('maxTeams', 0), data_dict.get('priority', 0),
+                   data_dict.get('serverName'), data_dict.get('action', False))

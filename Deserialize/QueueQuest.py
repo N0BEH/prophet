@@ -1,3 +1,5 @@
+import json
+
 from QueueType import QueueType
 
 
@@ -31,3 +33,9 @@ class QueueQuest(QueueType):
 
     def is_type_of(self, other):
         return isinstance(other, QueueQuest)
+
+    @classmethod
+    def from_json(cls, data):
+        data_dict = json.loads(data)
+        return cls(data_dict.get('perPlayerTeam', 0), data_dict.get('maxTeams', 0), data_dict.get('priority', 0),
+                   data_dict.get('serverName'), data_dict.get('action', False))
