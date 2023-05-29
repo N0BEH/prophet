@@ -21,7 +21,7 @@ def loadRedisDataToCSV():
 
     prefix = 'Elypool:PointInTime:'
 
-    one_day_ago = datetime.now() - timedelta(days=10)
+    ten_days_ago = datetime.now() - timedelta(days=10)
 
     data_points = {}
 
@@ -30,7 +30,7 @@ def loadRedisDataToCSV():
         datetime_str = key_parts[2].replace('/', ' ')
         key_datetime = datetime.strptime(datetime_str, '%Y-%m-%d %H-%M-%S')
 
-        if key_datetime > one_day_ago:
+        if key_datetime > ten_days_ago:
             data = r.get(key).decode()
 
             data_points[key_datetime.strftime('%Y-%m-%d %H:%M:%S')] = PointInTime.from_json(data)
@@ -44,13 +44,13 @@ def loadRedisDataToCSV():
 
     with open('output.csv', 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['ds', 'servers', 'candidates'])
+        writer.writerow(['ds', 'servers', 'candidate_1', 'candidate_2', 'candidate_3'])
 
         for key in sorted_keys:
             print(key)
             servers = data_points[key].get_total_servers() if key in data_points else ''
-            candidates = data_points[key].get_total_candidates() if key in data_points else ''
-            writer.writerow([key, servers, candidates])
+            candidates = [stat.get_total_candidates() for stat in data_points[key].stats] if key in data_points else ['','','']
+            writer.writerow([key, servers, *candidates])
 
     print('Les données ont été écrites dans output.csv')
 
@@ -59,7 +59,7 @@ def loadRedisData():
 
     prefix = 'Elypool:PointInTime:'
 
-    one_day_ago = datetime.now() - timedelta(days=1)
+    one_day_ago = datetime.now() - timedelta(days=10)
 
     data_points = {}
 
@@ -78,38 +78,62 @@ def loadRedisData():
     results = []
     for key in sorted_keys:
         servers = data_points[key].get_total_servers() if key in data_points else ''
-        candidates = data_points[key].get_total_candidates() if key in data_points else ''
-        results.append({'ds': key, 'servers': servers, 'candidates': candidates})
+        candidates = [stat.get_total_candidates() for stat in data_points[key].stats] if key in data_points else ['','','']
+        results.append({'ds': key, 'servers': servers, 'candidate_1': candidates[0], 'candidate_2': candidates[1], 'candidate_3': candidates[2]})
 
     return results
 
 def predict_candidates(data, number_of_cicles, freq):
+    forecasts = []
+
+    for candidate in ['candidate_1', 'candidate_2', 'candidate_3']:
+        df = pd.DataFrame(data)
+        df = df.rename(columns={candidate: 'y'})
+        df['ds'] = pd.to_datetime(df['ds'])
+
+        model_candidates = Prophet()
+        model_candidates.fit(df)
+
+        future_dates = model_candidates.make_future_dataframe(periods=int(number_of_cicles), freq=str(freq))
+        forecast_candidates = model_candidates.predict(future_dates)
+        forecasts.append(forecast_candidates)
+
+    return forecasts  # A list of three forecasts
+
+def predict_servers(data, number_of_cicles, forecast_candidates, freq):
     df = pd.DataFrame(data)
-    df = df.rename(columns={'ds': 'ds', 'candidates': 'y'})
-    df['ds'] = pd.to_datetime(df['ds'])
-
-    model_candidates = Prophet()
-    model_candidates.fit(df)
-
-    future_dates = model_candidates.make_future_dataframe(periods=int(number_of_cicles), freq=str(freq))
-    forecast_candidates = model_candidates.predict(future_dates)
-
-    return forecast_candidates
-
-def predict_servers(data, number_of_cicles, forecast_candidates):
-    df = pd.DataFrame(data)
-    df = df.rename(columns={'ds': 'ds', 'servers': 'y', 'candidates': 'candidates'})
+    df = df.rename(columns={'servers': 'y', 'candidate_1': 'candidate_1', 'candidate_2': 'candidate_2',
+                            'candidate_3': 'candidate_3'})
     df['ds'] = pd.to_datetime(df['ds'])
 
     model_servers = Prophet()
-    model_servers.add_regressor('candidates')
+    model_servers.add_regressor('candidate_1')
+    model_servers.add_regressor('candidate_2')
+    model_servers.add_regressor('candidate_3')
+
+    for i, forecast in enumerate(forecast_candidates):
+        df['candidate_{}'.format(i + 1)] = forecast['yhat']
+
     model_servers.fit(df)
 
-    future_dates = df.copy()
-    future_dates = future_dates._append(forecast_candidates[['ds']].tail(int(number_of_cicles)), ignore_index=True)
-    future_dates['candidates'] = forecast_candidates['yhat'].values
+    future = df.copy()
+    for i, forecast in enumerate(forecast_candidates):
+        future['candidate_{}'.format(i + 1)] = forecast['yhat']
 
-    forecast_servers = model_servers.predict(future_dates)
+    # Add future periods
+    last_date = future['ds'].max()
+    future_periods = pd.date_range(start=last_date, periods=number_of_cicles + 1, freq=freq)[
+                        1:]  # Exclude the first date because it's already in `future`
+    future_periods_df = pd.DataFrame(index=future_periods)
+    future_periods_df.reset_index(inplace=True)
+    future_periods_df.columns = ['ds']
+    for i in range(3):
+        future_periods_df['candidate_{}'.format(i + 1)] = forecast_candidates[i]['yhat'].tail(
+            number_of_cicles).values
+
+    future = pd.concat([future, future_periods_df])
+
+    forecast_servers = model_servers.predict(future)
 
     forecast_future = forecast_servers[forecast_servers['ds'] > max(df['ds'])]
     print(forecast_future[['ds', 'yhat', 'yhat_lower', 'yhat_upper']])
@@ -123,9 +147,9 @@ def predict_servers(data, number_of_cicles, forecast_candidates):
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     frequence = '10min'  # minutes
-    number_of_cicles = 1
+    number_of_cicles = 2
 
-    fromRedis = True
+    fromRedis = True  # Set this to False if you want to load data from CSV
 
     if fromRedis:
         data = loadRedisData()
@@ -134,4 +158,4 @@ if __name__ == '__main__':
         data = loadDataFromCSV()
 
     forecast_candidates = predict_candidates(data, number_of_cicles, frequence)
-    predict_servers(data, number_of_cicles, forecast_candidates)
+    predict_servers(data, number_of_cicles, forecast_candidates, frequence)
