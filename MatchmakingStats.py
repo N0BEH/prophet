@@ -1,3 +1,5 @@
+import json
+
 class MatchmakingStats:
     def __init__(self, total_candidates=0, queue_type=None):
         self.total_candidates = total_candidates
@@ -14,3 +16,9 @@ class MatchmakingStats:
 
     def set_queue_type(self, queue_type):
         self.queue_type = queue_type
+
+    @classmethod
+    def from_json(cls, data):
+        data_dict = json.loads(data)
+        return cls(total_candidates=data_dict.get('totalCandidates', 0), queue_type=data_dict.get('queueType'))
+

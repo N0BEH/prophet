@@ -8,6 +8,9 @@ import redis
 from datetime import datetime, timedelta
 from prophet.plot import plot_plotly, plot_components_plotly
 
+from PointInTime import PointInTime
+
+
 def destroyAllRedisData():
     r = redis.Redis(host='localhost', port=6379, db=0)
     r.flushall()
@@ -40,30 +43,34 @@ def generateRandomData():
 
         start_time = start_time - timedelta(minutes=5)
 
+def loadDataFromCSV():
+    df = pd.read_csv('output.csv')
+    df['ds'] = pd.to_datetime(df['ds'])
+
+    # Convert DataFrame to list of dictionaries
+    data = df.to_dict('records')
+    return data
 
 def loadRedisDataToCSV():
     r = redis.Redis(host='localhost', port=6379)
 
     prefix = 'Elypool:PointInTime:'
 
-    five_days_ago = datetime.now() - timedelta(days=1)
+    one_day_ago = datetime.now() - timedelta(days=1)
 
-    data_servers = {}
-    data_candidates = {}
+    data_points = {}
 
     for key in r.scan_iter(f'{prefix}*'):
         key_parts = key.decode().split(':')
-        datetime_str, category = key_parts[2], key_parts[3]
-        key_datetime = datetime.strptime(datetime_str, '%Y-%m-%d/%H-%M-%S')
+        datetime_str = key_parts[2].replace('/', ' ')
+        key_datetime = datetime.strptime(datetime_str, '%Y-%m-%d %H-%M-%S')
 
-        if key_datetime > five_days_ago:
-            if category == "servers":
-                data_servers[key_datetime.strftime('%Y-%m-%d %H:%M:%S')] = r.get(key).decode()
-            elif category == "candidates":
-                data_candidates[key_datetime.strftime('%Y-%m-%d %H:%M:%S')] = r.get(key).decode()
+        if key_datetime > one_day_ago:
+            data = r.get(key).decode()
 
-    sorted_keys_servers = sorted(data_servers.keys())
-    sorted_keys_candidates = sorted(data_candidates.keys())
+            data_points[key_datetime.strftime('%Y-%m-%d %H:%M:%S')] = PointInTime.from_json(data)
+
+    sorted_keys = sorted(data_points.keys())
 
     if os.path.exists("output.csv"):
         os.remove("output.csv")
@@ -74,47 +81,69 @@ def loadRedisDataToCSV():
         writer = csv.writer(csvfile)
         writer.writerow(['ds', 'servers', 'candidates'])
 
-        for key in sorted_keys_servers:
+        for key in sorted_keys:
             print(key)
-            writer.writerow([key, data_servers[key], data_candidates.get(key, '')])
+            servers = data_points[key].get_total_servers() if key in data_points else ''
+            candidates = data_points[key].get_total_candidates() if key in data_points else ''
+            writer.writerow([key, servers, candidates])
 
     print('Les données ont été écrites dans output.csv')
 
+def loadRedisData():
+    r = redis.Redis(host='localhost', port=6379)
 
-def predict_candidates(number_of_cicles, freq):
-    # Préparez vos données comme avant
-    df = pd.read_csv('output.csv')
+    prefix = 'Elypool:PointInTime:'
+
+    one_day_ago = datetime.now() - timedelta(days=1)
+
+    data_points = {}
+
+    for key in r.scan_iter(f'{prefix}*'):
+        key_parts = key.decode().split(':')
+        datetime_str = key_parts[2].replace('/', ' ')
+        key_datetime = datetime.strptime(datetime_str, '%Y-%m-%d %H-%M-%S')
+
+        if key_datetime > one_day_ago:
+            data = r.get(key).decode()
+
+            data_points[key_datetime.strftime('%Y-%m-%d %H:%M:%S')] = PointInTime.from_json(data)
+
+    sorted_keys = sorted(data_points.keys())
+
+    results = []
+    for key in sorted_keys:
+        servers = data_points[key].get_total_servers() if key in data_points else ''
+        candidates = data_points[key].get_total_candidates() if key in data_points else ''
+        results.append({'ds': key, 'servers': servers, 'candidates': candidates})
+
+    return results
+
+def predict_candidates(data, number_of_cicles, freq):
+    df = pd.DataFrame(data)
     df = df.rename(columns={'ds': 'ds', 'candidates': 'y'})
     df['ds'] = pd.to_datetime(df['ds'])
 
-    # Entraînez un modèle pour prédire 'candidates'
     model_candidates = Prophet()
     model_candidates.fit(df)
 
-    # Prédisez les valeurs futures de 'candidates'
     future_dates = model_candidates.make_future_dataframe(periods=int(number_of_cicles), freq=str(freq))
     forecast_candidates = model_candidates.predict(future_dates)
 
     return forecast_candidates
 
-
-def predict_servers(number_of_cicles, forecast_candidates):
-    # Préparez vos données comme avant
-    df = pd.read_csv('output.csv')
+def predict_servers(data, number_of_cicles, forecast_candidates):
+    df = pd.DataFrame(data)
     df = df.rename(columns={'ds': 'ds', 'servers': 'y', 'candidates': 'candidates'})
     df['ds'] = pd.to_datetime(df['ds'])
 
-    # Entraînez un modèle pour prédire 'servers'
     model_servers = Prophet()
     model_servers.add_regressor('candidates')
     model_servers.fit(df)
 
-    # Préparez le DataFrame future_dates avec les valeurs prédites de 'candidates'
     future_dates = df.copy()
     future_dates = future_dates._append(forecast_candidates[['ds']].tail(int(number_of_cicles)), ignore_index=True)
     future_dates['candidates'] = forecast_candidates['yhat'].values
 
-    # Prédisez les valeurs futures de 'servers'
     forecast_servers = model_servers.predict(future_dates)
 
     forecast_future = forecast_servers[forecast_servers['ds'] > max(df['ds'])]
@@ -131,11 +160,15 @@ if __name__ == '__main__':
     frequence = '10min'  # minutes
     number_of_cicles = 1
 
-    destroyAllRedisData()
+    fromRedis = True
 
-    generateRandomData()
+    if not fromRedis:
+        loadRedisDataToCSV()
 
-    loadRedisDataToCSV()
+    if fromRedis:
+        data = loadRedisData()
+    else:
+        data = loadDataFromCSV()
 
-    forecast_candidates = predict_candidates(number_of_cicles, frequence)
-    predict_servers(number_of_cicles, forecast_candidates)
+    forecast_candidates = predict_candidates(data, number_of_cicles, frequence)
+    predict_servers(data, number_of_cicles, forecast_candidates)
