@@ -1,0 +1,15 @@
+redis:
+  host: 'localhost'
+  port: 6379
+  prefix: 'Elypool:PointInTime:'
+  enabled: = True
+
+load_data:
+  past_days: 10
+
+filters:
+  kolizeum: 3
+
+prediction:
+  number_of_cicles: 1
+  freq: '10min'

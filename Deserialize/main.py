@@ -8,6 +8,15 @@ import redis
 from datetime import datetime, timedelta
 from PointInTime import PointInTime
 
+import yaml
+
+def load_config(file_name):
+    with open(file_name, 'r') as file:
+        config = yaml.safe_load(file)
+    return config
+
+config = load_config('config.yaml')
+
 def loadDataFromCSV():
     df = pd.read_csv('output.csv')
     df['ds'] = pd.to_datetime(df['ds'])
@@ -17,11 +26,11 @@ def loadDataFromCSV():
     return data
 
 def loadRedisDataToCSV(filterType, nCandidates):
-    r = redis.Redis(host='localhost', port=6379)
+    r = redis.Redis(host=config['redis']['host'], port=config['redis']['port'])
 
-    prefix = 'Elypool:PointInTime:'
+    prefix = config['redis']['prefix']
 
-    ten_days_ago = datetime.now() - timedelta(days=10)
+    ten_days_ago = datetime.now() - timedelta(days=config['load_data']['past_days'])
 
     data_points = {}
 
@@ -55,11 +64,11 @@ def loadRedisDataToCSV(filterType, nCandidates):
 
 
 def loadRedisData(filterType, nCandidates):
-    r = redis.Redis(host='localhost', port=6379)
+    r = redis.Redis(host=config['redis']['host'], port=config['redis']['port'])
 
-    prefix = 'Elypool:PointInTime:'
+    prefix = config['redis']['prefix']
 
-    one_day_ago = datetime.now() - timedelta(days=10)
+    one_day_ago = datetime.now() - timedelta(days=config['load_data']['past_days'])
 
     data_points = {}
 
@@ -90,7 +99,7 @@ def loadRedisData(filterType, nCandidates):
 
     return results
 
-def predict_candidates(data, number_of_cicles, freq, event):
+def predict_candidates(data, event):
     forecasts = []
 
     for candidate in ['candidate_1', 'candidate_2', 'candidate_3']:
@@ -101,13 +110,13 @@ def predict_candidates(data, number_of_cicles, freq, event):
         model_candidates = Prophet(holidays=event)
         model_candidates.fit(df)
 
-        future_dates = model_candidates.make_future_dataframe(periods=int(number_of_cicles), freq=str(freq))
+        future_dates = model_candidates.make_future_dataframe(periods=int(config['prediction']['number_of_cicles']), freq=str(config['prediction']['freq']))
         forecast_candidates = model_candidates.predict(future_dates)
         forecasts.append(forecast_candidates)
 
     return forecasts  # A list of three forecasts
 
-def predict_servers(data, number_of_cicles, forecast_candidates, freq, event):
+def predict_servers(data, forecast_candidates, event):
     df = pd.DataFrame(data)
     df = df.rename(columns={'servers': 'y'})
     df['ds'] = pd.to_datetime(df['ds'])
@@ -125,13 +134,13 @@ def predict_servers(data, number_of_cicles, forecast_candidates, freq, event):
 
     # Add future periods
     last_date = future['ds'].max()
-    future_periods = pd.date_range(start=last_date, periods=number_of_cicles + 1, freq=freq)[
+    future_periods = pd.date_range(start=last_date, periods=config['prediction']['number_of_cicles'] + 1, freq=config['prediction']['freq'])[
                         1:]  # Exclude the first date because it's already in `future`
     future_periods_df = pd.DataFrame(index=future_periods)
     future_periods_df.reset_index(inplace=True)
     future_periods_df.columns = ['ds']
     for i in range(len(forecast_candidates)):
-        future_periods_df[f'candidate_{i + 1}'] = forecast_candidates[i]['yhat'].tail(number_of_cicles).values
+        future_periods_df[f'candidate_{i + 1}'] = forecast_candidates[i]['yhat'].tail(config['prediction']['number_of_cicles']).values
 
     future = pd.concat([future, future_periods_df])
 
@@ -148,8 +157,8 @@ def predict_servers(data, number_of_cicles, forecast_candidates, freq, event):
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    frequence = '10min'  # minutes
-    number_of_cicles = 1
+
+    config = load_config('config.yaml')
 
     evenement_ouverture = pd.DataFrame({
         'holiday': 'event',
@@ -158,26 +167,22 @@ if __name__ == '__main__':
         'upper_window': 1,
     })
 
-    fromRedis = True  # Set this to False if you want to load data from CSV
-
-    filters = {
-        'kolizeum' : 3,
-    }
-
-    for key, value in filters.items():
+    for key, value in config['filters'].items():
         print(key, value)
 
-        if fromRedis:
+        if config['redis']['enabled']:
             data = loadRedisData(key, value)
             loadRedisDataToCSV(key, value)
         else:
             data = loadDataFromCSV()
 
-        forecast_candidates = predict_candidates(data, number_of_cicles, frequence, evenement_ouverture)
-        res = predict_servers(data, number_of_cicles, forecast_candidates, frequence, evenement_ouverture)
+        forecast_candidates = predict_candidates(data, evenement_ouverture)
+        res = predict_servers(data, forecast_candidates, evenement_ouverture)
 
-        if fromRedis:
-            r = redis.Redis(host='localhost', port=6379)
+        print(res)
+
+        if config['redis']['enabled']:
+            r = redis.Redis(host=config['redis']['host'], port=config['redis']['port'])
             r.set(f'Elypool:Forecast:{key}', res.to_json(orient='records'))
 
 
