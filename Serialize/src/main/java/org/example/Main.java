@@ -20,7 +20,7 @@ public class Main {
     public static void main(String[] args) {
 
         // Créer une nouvelle instance de Jedis
-        HostAndPort jedisConnexion = new HostAndPort("localhost", 6379);
+        HostAndPort jedisConnexion = new HostAndPort("localhost", 6380);
         Jedis jedis = new Jedis(jedisConnexion);
 
         System.out.println("Connexion à Redis réussie : " + jedis.ping());
@@ -29,7 +29,7 @@ public class Main {
         LocalDateTime startTime = now;
 
         //Destroy all data in redis
-        jedis.flushAll();
+        //jedis.flushAll();
 
         int totalPeriods = 15 * 24 * 60 / 5;
 
@@ -53,7 +53,7 @@ public class Main {
 
             Gson gson = new Gson();
             String pointInTimeJson = gson.toJson(pointInTime);
-            jedis.set("Elypool:PointInTime:" + key, pointInTimeJson);
+            jedis.set("ElyPool:Statistics:PointsInTime:" + key, pointInTimeJson);
 
             startTime = startTime.minusMinutes(5);
         }

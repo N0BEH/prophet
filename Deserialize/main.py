@@ -66,13 +66,18 @@ def loadRedisDataToCSV(filterType, nCandidates):
 def loadRedisData(filterType, nCandidates):
     r = redis.Redis(host=config['redis']['host'], port=config['redis']['port'])
 
+    print(r.ping())
+
     prefix = config['redis']['prefix']
+
+    print("Prefix : " + prefix)
 
     one_day_ago = datetime.now() - timedelta(days=config['load_data']['past_days'])
 
     data_points = {}
 
     for key in r.scan_iter(f'{prefix}*'):
+
         key_parts = key.decode().split(':')
         datetime_str = key_parts[3].replace('/', ' ')
         key_datetime = datetime.strptime(datetime_str, '%Y-%m-%d %H-%M-%S')

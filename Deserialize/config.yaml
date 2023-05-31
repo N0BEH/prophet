@@ -1,8 +1,14 @@
 redis:
   host: 'localhost'
+<<<<<<< HEAD
   port: 6379
   prefix: 'Elypool:PointInTime:'
   enabled: = False
+=======
+  port: 6380
+  prefix: 'ElyPool:Statistics:PointsInTime:'
+  enabled: = True
+>>>>>>> 8f810e97d775486cdd6ab9c5844e54e2b450b93e
 
 load_data:
   past_days: 10
