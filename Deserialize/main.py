@@ -36,7 +36,7 @@ def loadRedisDataToCSV(filterType, nCandidates):
 
     for key in r.scan_iter(f'{prefix}*'):
         key_parts = key.decode().split(':')
-        datetime_str = key_parts[2].replace('/', ' ')
+        datetime_str = key_parts[3].replace('/', ' ')
         key_datetime = datetime.strptime(datetime_str, '%Y-%m-%d %H-%M-%S')
 
         if key_datetime > ten_days_ago:
@@ -74,7 +74,7 @@ def loadRedisData(filterType, nCandidates):
 
     for key in r.scan_iter(f'{prefix}*'):
         key_parts = key.decode().split(':')
-        datetime_str = key_parts[2].replace('/', ' ')
+        datetime_str = key_parts[3].replace('/', ' ')
         key_datetime = datetime.strptime(datetime_str, '%Y-%m-%d %H-%M-%S')
 
         if key_datetime > one_day_ago:
@@ -101,8 +101,13 @@ def loadRedisData(filterType, nCandidates):
 
 def predict_candidates(data, event):
     forecasts = []
+    cols = []
 
-    for candidate in ['candidate_1', 'candidate_2', 'candidate_3']:
+    for i in range(int(config['filters']['kolizeum'])):
+        print(f'candidate_{i + 1}')
+        cols.append(f'candidate_{i + 1}')
+
+    for candidate in cols:
         df = pd.DataFrame(data)
         df = df.rename(columns={candidate: 'y'})
         df['ds'] = pd.to_datetime(df['ds'])
@@ -114,7 +119,8 @@ def predict_candidates(data, event):
         forecast_candidates = model_candidates.predict(future_dates)
         forecasts.append(forecast_candidates)
 
-    return forecasts  # A list of three forecasts
+    return forecasts  # A list of forecasts for each candidate
+
 
 def predict_servers(data, forecast_candidates, event):
     df = pd.DataFrame(data)
@@ -169,6 +175,7 @@ if __name__ == '__main__':
 
     for key, value in config['filters'].items():
         print(key, value)
+        print(config['redis']['enabled'])
 
         if config['redis']['enabled']:
             data = loadRedisData(key, value)
